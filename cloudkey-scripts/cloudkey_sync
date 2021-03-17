@@ -3,10 +3,27 @@
 RSYNC_USER="cloudkey-sync"
 RSYNC_HOST="nas.local"
 RSYNC_PATH="/path/to/sync/dest"
+# Age of files in days.
+RSYNC_AGE=1
 
 # Set our paths
 SRC_PATH="/srv/unifi-protect/video/"
 DST_PATH="${RSYNC_USER}@${RSYNC_HOST}:${RSYNC_PATH}"
+
+# File age handling if it's passed on the command line, otherwise
+# default to the ${RSYNC_AGE}
+if [ -z "$1" ]
+    then
+    FILE_AGE=${RSYNC_AGE}
+else
+    if ! [[ "$1" =~ ^[0-9]+$ ]]
+        then
+        echo "Input value must be a number, received: '${1}'"
+        exit 1
+    else
+        FILE_AGE=$1
+    fi
+fi
 
 # Lockfile Settings
 BASE_NAME="$(basename "$0")"
@@ -21,12 +38,10 @@ else
     touch "${LOCK_FILE}"
     # Now rsync
     echo "Synchronizing Files from ${SRC_PATH} to ${DST_PATH}"
+    echo "Maximum Age is ${FILE_AGE} days."
     rsync -avP --inplace \
      -e "ssh -i /root/.ssh/id_rsa -p 22" \
-     --include="*_0_rotating_*.ubv" \
-     --exclude="*_2_*" \
-     --exclude="*_0_timelapse*" \
-     --exclude="pool" \
+     --files-from=<(find "${SRC_PATH}" -mtime -"${FILE_AGE}" -type f -name "*_0_rotating_*.ubv" -exec realpath --relative-to "${SRC_PATH}" '{}' \;) \
      "${SRC_PATH}" "${DST_PATH}"
     echo "Done!"
     rm -f "${LOCK_FILE}"

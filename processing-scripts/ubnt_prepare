@@ -6,7 +6,7 @@
 # and generate them. I wrote in lockfile support so it has parallel support.
 
 if [ -z "$UBVINFO" ] ; then
-	UBVINFO=/usr/bin/ubnt_ubvinfo
+	UBVINFO=/usr/local/bin/ubnt_ubvinfo
 fi
 
 function helptext() {

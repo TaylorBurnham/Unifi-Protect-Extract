@@ -1,3 +1,14 @@
+# Work in Progress Warning
+
+This is a work in progress and I'm not following any best practices for commits. This is what this project currently offers.
+
+ - [x] Synchronization Script from the CloudKey to my NAS.
+ - [x] Preparation Scripts for identifying timecodes in the UBV files.
+ - [ ] Scripts for extracting the MP4 files from UBV.
+ - [ ] Scripts for combining and splitting the MP4 files.
+ - [ ] Scripts for mapping MAC addresses to cameras.
+ - [ ] Scripts for cleaning up temporary spaces and purging old files.
+
 # Unifi-Protect-Extract
 A collection of scripts and utilities that I use to extract videos from my CloudKey Gen 2 running Unifi Protect.
 
@@ -16,7 +27,7 @@ The objective of this project is to automate the extraction and filing of footag
 * Running `rsync` on the CloudKey to ship UBV files onto my Synology NAS.
 * Running the `prepare.sh` utility to extract the timecodes from the UBV files for `remux`.
 * Running the `remux` utility to extract the files.
-* Combining the output files and then splitting them into more managable segments.
+* Combining the output files and then splitting them into more manageable segments.
 * Utilizing the Unifi Protect API to name the files based off the source of the footage.
 * Then finally storing the footage in a location that can be indexed and searched.
 
@@ -32,7 +43,7 @@ This is my environment that I am running it on.
 # Getting Started
 ## CloudKey Setup
 
-These steps will get the CloudKey set up for synchronizing the UBV files to another location. There is a lockfile stored at `/tmp/cloudkey-sync.sh.lock` to prevent multiple instances from running at once. If for some reason you notice synchronization isn't happening make sure that file doesn't exist.
+These steps will get the CloudKey set up for synchronizing the UBV files to another location. There is a lockfile stored at `/tmp/cloudkey_sync.lock` to prevent multiple instances from running at once. If for some reason you notice synchronization isn't happening make sure that file doesn't exist.
 
 1. Install rsync on the CloudKey.
 
@@ -42,9 +53,13 @@ These steps will get the CloudKey set up for synchronizing the UBV files to anot
 
     `ssh-keygen -t rsa -b 4096`
 
-3. Move the `cloudkey-sync.sh` script onto your CloudKey and make it executable.
+3. Move the `cloudkey_sync` script onto your CloudKey, place it in the `/root/bin` folder, and make it executable.
 
-    `chmod +x cloudkey-sync.sh`
+    ```
+    mkdir /root/bin
+    mv cloudkey_sync /root/bin/.
+    chmod a+x /root/bin/cloudkey_sync
+    ```
 
 4. Update the following variables.
 
@@ -54,51 +69,92 @@ These steps will get the CloudKey set up for synchronizing the UBV files to anot
 
     `$SYNC_PATH` with the on the destination server you will be synchronizing the files to.
 
-5. Run the script to do the initial synchronization.
-6. Add a crontab entry to synchronize the data at whatever interval you prefer. I only want to do every 2 hours since the UBV files are stored in 1GB blocks and usually roll over every 2-3 hours.
+    You can also update the optional variable below, but I recommend keeping it to 1 day.
 
-    `0 */2 * * * /root/cloudkey-sync.sh`
+    `$RSYNC_AGE` will determine how far back to go to synchronize files. This is important for your remux process on the other end so you do not remux and purge files that will just be re-synchronized.
+
+5. Run the script to do the initial synchronization and set the number of days to the maximum age you want to synchronize.
+
+    `/root/bin/cloudkey_sync 7`
+
+    In this case I am only going to grab the last 7 days for my initial pull.
+
+6. Add a crontab entry to synchronize the data at whatever interval you prefer. I only want to do every 4 hours since the UBV files are stored in 1GB blocks and usually roll over every 2-3 hours.
+
+    `0 */4 * * * /root/bin/cloudkey_sync`
+
+    The UBV format means that each time they roll over a new file is allocated in that 1GB block, and rsync will detect changes on that file and synchronize it. That's a waste of time in my opinion and it's better to just run every 4 hours and avoid wasted CPU time.
 
 The files should synchronize and depending on your network speed, the retention policy on the CloudKey, and other things it could take some time.
+
+## Identifying Cameras
+
+All of the output files are named with the MAC address of the camera that was recorded, which isn't very useful for identifying where the originating footage came from. To overcome this we can query the API of the CloudKey Protect instance to return the list of cameras, and this makes it easier to add cameras in the future.
+
+### Credentialing the API User
+
+Your account should be as least privileged as possible since it will be a local authentication account. Mine was granted View Only on UniFi Protect and None on UniFi Network, and I also assigned a very long password.
+
+Once this account is created store the username and password somewhere secure, such as KeePass, 1Password, or anywhere but a plain text file.
 
 ## Processing Server Scripts
 
 Now that the files are stored on a network share I will want to run the preparation utility provided by Peter to generate the necessary timecodes to extract footage. The out of the box script he provides works, but I modified it to work on my workstation.
 
-1. Install the necessary utilities to run `qemu-user` and `ffmpeg`.
+1. Install the necessary utilities to run `qemu-user`, `ffmpeg`, and `jq` for parsing JSON files.
 
-    `sudo apt install -y qemu-user gcc-aarch64-linux-gnu ffmpeg`
+    `sudo apt install -y qemu-user gcc-aarch64-linux-gnu ffmpeg jq`
 
 2. Copy the `ubnt_ubvinfo` from your Unifi Protect installation onto your Linux machine. You can locate it under this path.
 
     `/usr/share/unifi-protect/app/node_modules/.bin/ubnt_ubvinfo`
 
-3. Move it to `/usr/bin` and prefix it with `arm-`.
+3. Move it to `/usr/local/bin` and prefix it with `arm-`.
 
-    `sudo mv ubnt_ubvinfo /usr/bin/arm-ubnt_ubvinfo`
+    `sudo mv ubnt_ubvinfo /usr/local/bin/arm-ubnt_ubvinfo`
 
 4. Create a wrapper script to call upon this with the right libraries so it has ARM support and make it executable.
 
-    ```sudo tee /usr/bin/ubnt_ubvinfo <<EOF
+    ```sudo tee /usr/local/bin/ubnt_ubvinfo <<EOF
     #!/bin/sh
     export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
-    exec qemu-aarch64 /usr/bin/arm-ubnt_ubvinfo \$*
+    exec qemu-aarch64 /usr/local/bin/arm-ubnt_ubvinfo \$*
     EOF
-    chmod +x /usr/bin/ubnt_ubvinfo```
-5. Install the `ubv-prepare.sh` script to `/usr/bin` and make it executable.
+    chmod +x /usr/local/bin/ubnt_ubvinfo```
 
-    `chmod +x /usr/bin/ubv-prepare.sh`
+5. Install the `ubnt_prepare` script to `/usr/local/bin` and make it executable.
+
+    `sudo chmod +x /usr/local/bin/ubnt_prepare`
 
 6. Installed `remux` to your path by downloading it from the [release page](https://github.com/petergeneric/unifi-protect-remux/releases), then put it in the right directory.
 
     ```
     wget https://github.com/petergeneric/unifi-protect-remux/releases/download/3.0.2/remux-x86_64.tar.gz
     tar xfvz remux-x86_64.tar.gz
-    sudo mv remux /usr/bin/
+    sudo mv remux /usr/local/bin/
+    ```
+
+6. Create the configuration folder for your processing scripts.
+
+    `sudo mkdir /etc/unifi-protect-extract`
+
+7. Place the `unifi-protect.conf` file in the `/etc/unifi-protect-extract` folder and update the following variables.
+
+    `CLOUDKEY_CONTROLLER` with the hostname of your CloudKey controller.
+
+    `CLOUDKEY_USERNAME` with the username of the service account you created.
+
+    `CLOUDKEY_PASSWORD` with the password of the service account you created.
+
+8. Make the file owned by root and only accessible by root.
+
+    ```
+    sudo chown -Rv root:root /etc/unifi-protect-extract
+    sudo chmod 700 /etc/unifi-protect-extract
+    sudo chmod 600 /etc/unifi-protect-extract/unifi-protect.conf
     ```
 
 ## Scheduling Processing
 
 It's up to you how to handle this. Do you want to output them in the same directory, or somewhere else where a media server can index them? I'll be processing them into a separate directory and grouping by camera, then the additional processing.
 
-**This is a work in progress.**

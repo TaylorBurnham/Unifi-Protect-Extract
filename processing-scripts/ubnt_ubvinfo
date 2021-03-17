@@ -1,3 +1,3 @@
 #!/bin/sh
 export QEMU_LD_PREFIX=/usr/aarch64-linux-gnu
-exec qemu-aarch64 /usr/bin/arm-ubnt_ubvinfo $*
+exec qemu-aarch64 /usr/local/bin/arm-ubnt_ubvinfo $*
