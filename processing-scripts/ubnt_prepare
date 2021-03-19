@@ -13,14 +13,6 @@ function helptext() {
 	echo "Usage: $0 *_0_rotating_*.ubv"
 }
 
-function generate() {
-	INPUT_FILE=$1
-	OUTPUT_FILE="${INPUT_FILE}.txt"
-	echo "Creating indices for ${INPUT_FILE}"
-	${UBVINFO} -P -f "${INPUT_FILE}" > "${OUTPUT_FILE}"
-	echo "Done!"
-}
-
 BASE_NAME="$(basename "$1")"
 LOCK_FILE="/tmp/${BASE_NAME}.lock"
 trap "rm -f ${LOCK_FILE}" SIGINT SIGTERM
@@ -34,8 +26,19 @@ elif [ -e "${LOCK_FILE}" ] ; then
 	echo "${LOCK_FILE} exists for this file."
 	exit 1
 else
+	INPUT_FILE=$1
+	OUTPUT_FILE="${INPUT_FILE}.txt"
+	# Create a trap to delete the output file if it's interrupted.
+	trap "rm -f ${LOCK_FILE} ${OUTPUT_FILE}" SIGINT SIGTERM
+	# Verify this file doesn't already have an index.
+	if [ -e "${INPUT_FILE}.txt" ] ; then
+		echo "${INPUT_FILE} already has indices."
+		exit 1
+	fi
 	touch "${LOCK_FILE}"
-	generate ${1}
+	echo "Creating indices for ${INPUT_FILE}"
+	${UBVINFO} -P -f "${INPUT_FILE}" > "${OUTPUT_FILE}"
+	echo "Done!"
 	rm -f "${LOCK_FILE}"
 	trap - SIGINT SIGTERM
 fi

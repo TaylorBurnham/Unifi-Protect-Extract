@@ -1,0 +1,34 @@
+#!/bin/bash
+# The purpose of this script is to process the files end to end
+# from the creation of the index files with ubnt_prepare, remux
+# via remux_process, and splitting files up by timestamps.
+PROTECT_CONFIG="/etc/unifi-protect-extract/unifi-protect.conf"
+
+if [ -f "${PROTECT_CONFIG}" ]
+    then
+    source "${PROTECT_CONFIG}"
+else
+    echo "Cannot locate unifi-protect.conf at ${PROTECT_CONFIG}"
+    exit 1
+fi
+
+# Create indices for files.
+# TODO: Add in a time filter to only grab files older than a day.
+find "${UBV_FILES}" -type f -iname '*.ubv' -exec ubnt_prepare "{}" \;
+
+# Make our temporary path
+TEMP_PATH=$(mktemp -p "${UBV_TEMP}" -d)
+# Begin processing files by folder.
+#for UBV_FOLDER in $(find "${UBV_FILES}" -type f -iname '*.ubv' -exec dirname "{}" \; | sort | uniq);
+for UBV_FOLDER in $(find "${UBV_FILES}" -type f -iname '*.ubv' -exec dirname "{}" \; | sort | uniq | egrep "2021\/01");
+do
+    echo "Processing files in ${UBV_FOLDER}"
+    cd "${TEMP_PATH}"
+    remux_process "${UBV_FOLDER}/*.ubv"
+    # Create the output path
+    UBV_FOLDER_OUTPUT="${UBV_OUTPUT}/$(realpath $UBV_FOLDER --relative-to "${UBV_FILES}")"
+    mkdir -pv "${UBV_FOLDER_OUTPUT}"
+    # Move the created files.
+    mv -v "${TEMP_PATH}/*" "${UBV_FOLDER_OUTPUT}/."
+    echo "Completed ${UBV_FOLDER}"
+done

@@ -7,12 +7,9 @@
 INPUT_FILE="${1}"
 OUTPUT_PATH="${2}"
 
-# Temporary Path
-TEMP_PATH="/media/nfs/unifi/ubv_temp" # REMOVE
-
 echo "Extracting Footage from ${INPUT_FILE} to ${OUTPUT_PATH}"
 echo "Using ${TEMP_PATH} for temporary storage."
 
 # Remove -with-audio if you don't want that, but I do.
-REMUX_PARAMS="-output-folder=\"${TEMP_PATH}\" -with-audio=true"
+REMUX_PARAMS="-with-audio=true"
 remux ${INPUT_FILE} ${REMUX_PARAMS}

@@ -146,6 +146,12 @@ Now that the files are stored on a network share I will want to run the preparat
 
     `CLOUDKEY_PASSWORD` with the password of the service account you created.
 
+    `UBV_FILES` with the location of the synchronized UBV files.
+
+    `UBV_TEMP` with a temporary location for files to go as they are processed.
+
+    `UBV_OUTPUT` with the location for the processed output files.
+
 8. Make the file owned by root and only accessible by root.
 
     ```
