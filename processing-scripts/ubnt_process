@@ -1,34 +1,157 @@
-#!/bin/bash
-# The purpose of this script is to process the files end to end
-# from the creation of the index files with ubnt_prepare, remux
-# via remux_process, and splitting files up by timestamps.
-PROTECT_CONFIG="/etc/unifi-protect-extract/unifi-protect.conf"
+#!/usr/bin/env python
+import os
+import shutil
+import tempfile
+import subprocess
+import requests
+from datetime import date, datetime
+from dateutil import parser
+from configparser import ConfigParser
 
-if [ -f "${PROTECT_CONFIG}" ]
-    then
-    source "${PROTECT_CONFIG}"
-else
-    echo "Cannot locate unifi-protect.conf at ${PROTECT_CONFIG}"
-    exit 1
-fi
 
-# Create indices for files.
-# TODO: Add in a time filter to only grab files older than a day.
-find "${UBV_FILES}" -type f -iname '*.ubv' -exec ubnt_prepare "{}" \;
+# Configuration File Location
+config_file = '/etc/unifi-protect-extract/unifi-protect.conf'
 
-# Make our temporary path
-TEMP_PATH=$(mktemp -p "${UBV_TEMP}" -d)
-# Begin processing files by folder.
-#for UBV_FOLDER in $(find "${UBV_FILES}" -type f -iname '*.ubv' -exec dirname "{}" \; | sort | uniq);
-for UBV_FOLDER in $(find "${UBV_FILES}" -type f -iname '*.ubv' -exec dirname "{}" \; | sort | uniq | egrep "2021\/01");
-do
-    echo "Processing files in ${UBV_FOLDER}"
-    cd "${TEMP_PATH}"
-    remux_process "${UBV_FOLDER}/*.ubv"
-    # Create the output path
-    UBV_FOLDER_OUTPUT="${UBV_OUTPUT}/$(realpath $UBV_FOLDER --relative-to "${UBV_FILES}")"
-    mkdir -pv "${UBV_FOLDER_OUTPUT}"
-    # Move the created files.
-    mv -v "${TEMP_PATH}/*" "${UBV_FOLDER_OUTPUT}/."
-    echo "Completed ${UBV_FOLDER}"
-done
+
+def parse_output_file(filepath):
+    print("Parsing {}".format(filepath))
+    # Get the basename of the file
+    filename = os.path.basename(filepath)
+    fileext = filepath.split(os.path.extsep)[-1]
+    # Remove the extension for further parsing
+    filename = filename.replace(".{}".format(fileext),"")
+    # Get the MAC address of the camera.
+    camera = filename.split('_')[0]
+    # Get the date of the file.
+    date = parser.parse(filename.split('_')[-1].replace('.',':'))
+    file_data = {
+        "path": filepath,
+        "name": filename,
+        "ext": fileext,
+        "camera": camera,
+        "date": date
+    }
+    return file_data
+
+def get_cameras(url, username, password, verify_ssl=True):
+    base_url = "https://{}".format(url)
+    session = requests.Session()
+    preauth = session.get(base_url, verify=verify_ssl)
+    session.headers.update(
+        {"X-CSRF-Token": preauth.headers['X-CSRF-Token']}
+    )
+    authentication = {
+        "username": username, "password": password, "rememberMe": False
+    }
+    authentication = session.post("{}/api/auth/login".format(base_url), data=authentication)
+    bootstrap = session.get("{}/proxy/protect/api/bootstrap".format(base_url))
+    camera_info = {}
+    for cam in bootstrap.json()['cameras']:
+        camera_info[cam['mac']] = {
+            "name": cam['name'],
+            "type": cam['type']
+        }
+    logout = session.post("{}/api/auth/logout".format(base_url))
+    return camera_info
+
+def get_ubv_files(ubv_path, min_age=3):
+    ubv_files = {}
+    for root, dirname, filename in os.walk(ubv_path):
+        if len(filename) > 0:
+            if root not in ubv_files:
+                ubv_date = "-".join(
+                    [x for x in root.replace(ubv_path, "").split(os.path.sep) if x]
+                )
+                ubv_date = parser.parse(ubv_date)
+                ubv_files[root] = {
+                    "files": [],
+                    "date": ubv_date
+                }
+            for f in [x for x in filename if x.endswith('.ubv')]:
+                ubv_files[root]['files'].append({
+                    "file": os.path.join(root, f),
+                    "prepared": (f + ".txt" in filename)
+                })
+    # Filter files older than min_age days
+    ubv_files = {
+        x[0]: x[1] for x in ubv_files.items() if (datetime.now() - x[1]['date']).days > min_age
+    }
+    return ubv_files
+
+def prepare_ubv_file(ubv_file, tmp_path):
+    ubv_filename = ubv_file['file'].split(os.path.sep)[-1]
+    print("Creating Indexes for {}".format(ubv_filename))
+    ubv_filepath = ubv_file['file'].replace(ubv_filename, "")
+
+    stdout_file = "{}.txt".format(ubv_filename)
+    stdout_path = os.path.join(tmp_path, stdout_file)
+    with open(stdout_path, 'wb') as out:
+        args = ['ubnt_ubvinfo', '-P', '-f', ubv_file['file']]
+        p = subprocess.Popen(args, stdout=out, cwd=tmp_path)
+        result = p.wait()
+    if result == 0:
+        new_path = shutil.move(stdout_path, os.path.join(ubv_filepath, stdout_file))
+
+def remux_file(ubv_file, tmp_path):
+    args = ['remux', '-with-audio', '-output-folder', tmp_path, ubv_file['file']]
+    r = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    r.wait()
+    # When completed get the name of the output file.
+    resulterr = r.stderr.read()
+    output_data = next((x for x in str(resulterr).split('\\n') if x.startswith('Writing MP4')), None)
+    if output_data:
+        mp4_file = next((x for x in output_data.split(' ') if tmp_path in x), None)
+        if os.path.exists(mp4_file):
+            return mp4_file
+
+def process_ubv_files(ubv_files, tmp_path, output_path):
+    # Get the camera information.
+    camera_info = get_cameras(
+        config['CLOUDKEY']['cloudkey_controller'], config['CLOUDKEY']['cloudkey_username'],
+        config['CLOUDKEY']['cloudkey_password'], verify_ssl
+    )
+    for ubv_folder, ubv_data in ubv_files.items():
+        print("Processing {}".format(ubv_data['date'].strftime("%Y-%m-%d")))
+        for ubv_file in ubv_data['files']:
+            if not ubv_file['prepared']:
+                prepare_ubv_file(ubv_file, tmp_path)
+            mp4_file = remux_file(ubv_file, tmp_path)
+            # Parse the output file
+            mp4_data = parse_output_file(mp4_file)
+            # Remap camera data
+            mp4_data['camera'] = camera_info[mp4_data['camera']]
+            # Get the date when this file originates
+            mp4_output_date = mp4_data['date'].strftime("%Y-%m-%d".format(os.path.sep))
+            # Directory syntax is /output/YYYY/mm/dd/camera/file.mp4
+            mp4_output_path = os.path.join(
+                config['FILEPATHS']['ubv_output'], mp4_output_date, mp4_data['camera']['name']
+            )
+            os.makedirs(mp4_output_path, exist_ok=True)
+            # Now move the file
+            mp4_filename = "{}.mp4".format("_".join([mp4_data['camera']['name'], mp4_data['date'].isoformat().replace(':','.')]))
+            mp4_output_file = os.path.join(
+                mp4_output_path, mp4_filename
+            )
+            new_path = shutil.move(mp4_data['path'], mp4_output_file)
+            print("Moved output MP4 to {}".format(new_path))
+            # Clean up old UBV files.
+            # TODO - This
+
+if __name__ == "__main__":
+    config = ConfigParser()
+    config.read(config_file)
+    # Determine if we should validate SSL certificates
+    verify_ssl = config['CLOUDKEY'].getboolean('CLOUDKEY_VERIFY_SSL')
+    if not verify_ssl:
+        import urllib3
+        urllib3.disable_warnings()
+    # Get the UBV files
+    ubv_files = get_ubv_files(config['FILEPATHS']['ubv_files'])
+    # Make our temporary path
+    TEMPORARY_PATH=tempfile.mkdtemp(dir=config['FILEPATHS']['ubv_temp'])
+    # Process the files
+    process_ubv_files(
+        ubv_files=ubv_files,
+        tmp_path=TEMPORARY_PATH,
+        output_path=config['FILEPATHS']['ubv_output']
+    )

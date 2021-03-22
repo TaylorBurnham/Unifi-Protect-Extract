@@ -1,14 +1,3 @@
-# Work in Progress Warning
-
-This is a work in progress and I'm not following any best practices for commits. This is what this project currently offers.
-
- - [x] Synchronization Script from the CloudKey to my NAS.
- - [x] Preparation Scripts for identifying timecodes in the UBV files.
- - [ ] Scripts for extracting the MP4 files from UBV.
- - [ ] Scripts for combining and splitting the MP4 files.
- - [ ] Scripts for mapping MAC addresses to cameras.
- - [ ] Scripts for cleaning up temporary spaces and purging old files.
-
 # Unifi-Protect-Extract
 A collection of scripts and utilities that I use to extract videos from my CloudKey Gen 2 running Unifi Protect.
 
@@ -22,14 +11,10 @@ The issue I faced was I didn't want to run this on my CloudKey since it's not th
 
 ## Objectives
 
-The objective of this project is to automate the extraction and filing of footage. I intend on doing this through:
+The objective of this project is to automate the extraction and filing of footage. I originally began writing this in bash, but as I put more time into it I realized what a colossal pain it was to deal with making calls to the Protect API using cURL, handling session tokens, CSRF, etc. This led to me rewriting this in Python 3 and it's much more flexible in my opinion.
 
-* Running `rsync` on the CloudKey to ship UBV files onto my Synology NAS.
-* Running the `prepare.sh` utility to extract the timecodes from the UBV files for `remux`.
-* Running the `remux` utility to extract the files.
-* Combining the output files and then splitting them into more manageable segments.
-* Utilizing the Unifi Protect API to name the files based off the source of the footage.
-* Then finally storing the footage in a location that can be indexed and searched.
+* A Shell script will be installed on the CloudKey to push .UBV containers onto a remote host.
+* A Python script will be installed on my workstation which has some horsepower behind it to wrap around the `remux` utility.
 
 ## Requirements
 
@@ -39,6 +24,8 @@ This is my environment that I am running it on.
 * Protect v1.17.3
 * Synology NAS Rackstation RS819
 * Debian 10 running under Windows Subsystem for Linux
+* [Unifi Protect Remux](https://github.com/petergeneric/unifi-protect-remux/)
+* Python 3.5+
 
 # Getting Started
 ## CloudKey Setup
@@ -122,11 +109,7 @@ Now that the files are stored on a network share I will want to run the preparat
     EOF
     chmod +x /usr/local/bin/ubnt_ubvinfo```
 
-5. Install the `ubnt_prepare` script to `/usr/local/bin` and make it executable.
-
-    `sudo chmod +x /usr/local/bin/ubnt_prepare`
-
-6. Installed `remux` to your path by downloading it from the [release page](https://github.com/petergeneric/unifi-protect-remux/releases), then put it in the right directory.
+5. Install `remux` to your path by downloading it from the [release page](https://github.com/petergeneric/unifi-protect-remux/releases), then put it in the `/usr/local/bin` directory.
 
     ```
     wget https://github.com/petergeneric/unifi-protect-remux/releases/download/3.0.2/remux-x86_64.tar.gz
@@ -146,6 +129,8 @@ Now that the files are stored on a network share I will want to run the preparat
 
     `CLOUDKEY_PASSWORD` with the password of the service account you created.
 
+    `CLOUDKEY_VERIFY_SSL` with Yes or No. If you do not have an SSL certificate installed on your CloudKey you should, but this lets you bypass verification if you live life like nobody is watching.
+
     `UBV_FILES` with the location of the synchronized UBV files.
 
     `UBV_TEMP` with a temporary location for files to go as they are processed.
@@ -160,7 +145,20 @@ Now that the files are stored on a network share I will want to run the preparat
     sudo chmod 600 /etc/unifi-protect-extract/unifi-protect.conf
     ```
 
+9. Install the ubnt_process script in `/usr/local/bin` and make it executable.
+
+    ```
+    mv ubnt_process /usr/local/bin`
+    chmod +x /usr/local/bin/ubnt_process
+    ```
+
 ## Scheduling Processing
 
 It's up to you how to handle this. Do you want to output them in the same directory, or somewhere else where a media server can index them? I'll be processing them into a separate directory and grouping by camera, then the additional processing.
 
+# TODO
+
+ - [ ] Update Python script with docstrings
+ - [ ] Update Python script with arguments for passing params
+ - [ ] Update `cloudkey_sync` to have a Python script feed filelists to rsync to be even more granular.
+ - [ ] Finish this document
