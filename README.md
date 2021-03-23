@@ -137,6 +137,8 @@ Now that the files are stored on a network share I will want to run the preparat
 
     `UBV_OUTPUT` with the location for the processed output files.
 
+    `UBV_ARCHIVE` with the location to archive .UBV files for eventual deletion.
+
 8. Make the file owned by root and only accessible by root.
 
     ```
@@ -160,5 +162,6 @@ It's up to you how to handle this. Do you want to output them in the same direct
 
  - [ ] Update Python script with docstrings
  - [ ] Update Python script with arguments for passing params
+ - [x] Update Python script to archive UBV files for purging.
  - [ ] Update `cloudkey_sync` to have a Python script feed filelists to rsync to be even more granular.
  - [ ] Finish this document

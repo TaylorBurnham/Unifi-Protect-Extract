@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 import os
+import sys
 import shutil
+import logging
 import tempfile
 import subprocess
 import requests
@@ -14,7 +16,7 @@ config_file = '/etc/unifi-protect-extract/unifi-protect.conf'
 
 
 def parse_output_file(filepath):
-    print("Parsing {}".format(filepath))
+    logger.debug("Parsing {}".format(filepath))
     # Get the basename of the file
     filename = os.path.basename(filepath)
     fileext = filepath.split(os.path.extsep)[-1]
@@ -35,6 +37,7 @@ def parse_output_file(filepath):
 
 def get_cameras(url, username, password, verify_ssl=True):
     base_url = "https://{}".format(url)
+    logger.info("Getting camera list from CloudKey at {}".format(base_url))
     session = requests.Session()
     preauth = session.get(base_url, verify=verify_ssl)
     session.headers.update(
@@ -46,7 +49,9 @@ def get_cameras(url, username, password, verify_ssl=True):
     authentication = session.post("{}/api/auth/login".format(base_url), data=authentication)
     bootstrap = session.get("{}/proxy/protect/api/bootstrap".format(base_url))
     camera_info = {}
+    logger.info("Retrieved {} cameras.".format(len(bootstrap.json()['cameras'])))
     for cam in bootstrap.json()['cameras']:
+        logger.debug("Adding Camera {} - {}".format(cam['name'], cam['mac']))
         camera_info[cam['mac']] = {
             "name": cam['name'],
             "type": cam['type']
@@ -55,6 +60,8 @@ def get_cameras(url, username, password, verify_ssl=True):
     return camera_info
 
 def get_ubv_files(ubv_path, min_age=3):
+    logger.info("Searching for UBV files older than {} days in {}".\
+        format(min_age, ubv_path))
     ubv_files = {}
     for root, dirname, filename in os.walk(ubv_path):
         if len(filename) > 0:
@@ -76,11 +83,26 @@ def get_ubv_files(ubv_path, min_age=3):
     ubv_files = {
         x[0]: x[1] for x in ubv_files.items() if (datetime.now() - x[1]['date']).days > min_age
     }
+    logger.info("Found {} total days worth of files.".format(len(ubv_files.keys())))
     return ubv_files
+
+def archive_ubv_file(ubv_file, archive_path):
+    logger.debug("Archiving {} to {}.".format(ubv_file['file'], archive_path))
+    ubv_filename = ubv_file['file'].split(os.path.sep)[-1]
+    ubv_filepath = ubv_file['file'].replace(ubv_filename, "")
+    ubv_basepath = ubv_filepath.replace(config['FILEPATHS']['UBV_FILES'] + "/", "")
+    ubv_archivepath = os.path.join(archive_path, ubv_basepath)
+    ubv_archivefile = os.path.join(ubv_archivepath, ubv_filename)
+    ubv_index_archivefile = os.path.join(ubv_archivepath, (ubv_filename + ".txt"))
+    os.makedirs(ubv_archivepath, exist_ok=True)
+    logger.debug("Moving {} to archive path {}".format(ubv_filename, ubv_archivepath))
+    shutil.move(ubv_file['file'], ubv_archivefile)
+    logger.debug("Moving {} to archive path {}".format((ubv_filename + ".txt"), ubv_archivepath))
+    shutil.move((ubv_file['file'] + ".txt"), ubv_archivefile)
 
 def prepare_ubv_file(ubv_file, tmp_path):
     ubv_filename = ubv_file['file'].split(os.path.sep)[-1]
-    print("Creating Indexes for {}".format(ubv_filename))
+    logger.debug("Creating Indexes for {}".format(ubv_filename))
     ubv_filepath = ubv_file['file'].replace(ubv_filename, "")
 
     stdout_file = "{}.txt".format(ubv_filename)
@@ -90,9 +112,14 @@ def prepare_ubv_file(ubv_file, tmp_path):
         p = subprocess.Popen(args, stdout=out, cwd=tmp_path)
         result = p.wait()
     if result == 0:
+        logger.debug("Moving Index file {} to {}".format(stdout_file, ubv_filepath))
         new_path = shutil.move(stdout_path, os.path.join(ubv_filepath, stdout_file))
+    else:
+        logger.error("Failed to create UBV index file.")
 
 def remux_file(ubv_file, tmp_path):
+    logger.info("Running remux against {}".format(
+        ubv_file['file'].split(os.path.sep)[-1]))
     args = ['remux', '-with-audio', '-output-folder', tmp_path, ubv_file['file']]
     r = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     r.wait()
@@ -102,27 +129,28 @@ def remux_file(ubv_file, tmp_path):
     if output_data:
         mp4_file = next((x for x in output_data.split(' ') if tmp_path in x), None)
         if os.path.exists(mp4_file):
+            logger.info("Completed remux of {}".format(mp4_file))
             return mp4_file
+    else:
+        logger.error("Failed to remux file. Full output:\n{}\n".format(str(resulterr)))
 
-def process_ubv_files(ubv_files, tmp_path, output_path):
+def process_ubv_files(ubv_files, tmp_path, output_path, archive_path):
     # Get the camera information.
     camera_info = get_cameras(
         config['CLOUDKEY']['cloudkey_controller'], config['CLOUDKEY']['cloudkey_username'],
         config['CLOUDKEY']['cloudkey_password'], verify_ssl
     )
     for ubv_folder, ubv_data in ubv_files.items():
-        print("Processing {}".format(ubv_data['date'].strftime("%Y-%m-%d")))
+        logger.info("Processing {}".format(ubv_data['date'].strftime("%Y-%m-%d")))
         for ubv_file in ubv_data['files']:
+            logger.debug("Handling {}".format(ubv_file['file']))
             if not ubv_file['prepared']:
+                logger.debug("File hasn't been prepared with indexes.")
                 prepare_ubv_file(ubv_file, tmp_path)
             mp4_file = remux_file(ubv_file, tmp_path)
-            # Parse the output file
             mp4_data = parse_output_file(mp4_file)
-            # Remap camera data
             mp4_data['camera'] = camera_info[mp4_data['camera']]
-            # Get the date when this file originates
             mp4_output_date = mp4_data['date'].strftime("%Y-%m-%d".format(os.path.sep))
-            # Directory syntax is /output/YYYY/mm/dd/camera/file.mp4
             mp4_output_path = os.path.join(
                 config['FILEPATHS']['ubv_output'], mp4_output_date, mp4_data['camera']['name']
             )
@@ -133,25 +161,44 @@ def process_ubv_files(ubv_files, tmp_path, output_path):
                 mp4_output_path, mp4_filename
             )
             new_path = shutil.move(mp4_data['path'], mp4_output_file)
-            print("Moved output MP4 to {}".format(new_path))
-            # Clean up old UBV files.
-            # TODO - This
+            logger.info("Moved output MP4 to {}".format(new_path))
+            # Archive
+            archive_ubv_file(
+                ubv_file, archive_path
+            )
 
 if __name__ == "__main__":
+    logging_handler = logging.StreamHandler(sys.stdout)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        format='[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s',
+        handlers=[logging_handler]
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Initialized.")
     config = ConfigParser()
+    logger.debug("Reading configuration file at {}".format(config_file))
     config.read(config_file)
     # Determine if we should validate SSL certificates
     verify_ssl = config['CLOUDKEY'].getboolean('CLOUDKEY_VERIFY_SSL')
     if not verify_ssl:
+        logger.warn("Disabling SSL verification due to CLOUDKEY_VERIFY_SSL={}.".format(verify_ssl))
         import urllib3
         urllib3.disable_warnings()
+    else:
+        logger.debug("SSL verification enabled.")
     # Get the UBV files
+    logger.info("Collecting UBV files.")
     ubv_files = get_ubv_files(config['FILEPATHS']['ubv_files'])
     # Make our temporary path
     TEMPORARY_PATH=tempfile.mkdtemp(dir=config['FILEPATHS']['ubv_temp'])
+    logger.debug("Temporary Path: {}".format(TEMPORARY_PATH))
     # Process the files
+    logger.info("Processing UBV Files")
     process_ubv_files(
         ubv_files=ubv_files,
         tmp_path=TEMPORARY_PATH,
-        output_path=config['FILEPATHS']['ubv_output']
+        output_path=config['FILEPATHS']['ubv_output'],
+        archive_path=config['FILEPATHS']['ubv_archive']
     )
+    logger.info("Completed Process")
