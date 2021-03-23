@@ -16,6 +16,16 @@ config_file = '/etc/unifi-protect-extract/unifi-protect.conf'
 
 
 def parse_output_file(filepath):
+    """Parses the Output File Name
+
+    Args:
+        filepath (str): The full path to the filename to parse.
+
+    Returns:
+        dict: A dict containing the path to the file, the base name,
+            the file extension, the camera MAC address from the file,
+            and the datetime of the file's creation.
+    """
     logger.debug("Parsing {}".format(filepath))
     # Get the basename of the file
     filename = os.path.basename(filepath)
@@ -36,6 +46,20 @@ def parse_output_file(filepath):
     return file_data
 
 def get_cameras(url, username, password, verify_ssl=True):
+    """Queries the Unifi Protect endpoint to return the list of cameras.
+
+    Args:
+        url (str): The hostname for the CloudKey.
+        username (str): The username for the user querying the CloudKey.
+        password (str): The password for the user querying the CloudKey.
+        verify_ssl (bool, optional): If SSL verification should be performed
+            on calls to the CloudKey instance. Defaults to True.
+
+    Returns:
+        dict: A dict containing a camera dict with the MAC address
+            as the key, and two entries each for the name of the
+            camera and the make of the camera.
+    """
     base_url = "https://{}".format(url)
     logger.info("Getting camera list from CloudKey at {}".format(base_url))
     session = requests.Session()
@@ -60,6 +84,17 @@ def get_cameras(url, username, password, verify_ssl=True):
     return camera_info
 
 def get_ubv_files(ubv_path, min_age=3):
+    """Locates UBV files in the given path older than X days.
+
+    Args:
+        ubv_path (str): The path to the UBV files.
+        min_age (int, optional): The minimum age for files. Defaults to 3.
+
+    Returns:
+        dict: Returns a dict with the key as the base path to the files
+            and contains a dict with the datetime of the folder and a
+            list of the files and if they have indices generates.
+    """
     logger.info("Searching for UBV files older than {} days in {}".\
         format(min_age, ubv_path))
     ubv_files = {}
@@ -87,6 +122,13 @@ def get_ubv_files(ubv_path, min_age=3):
     return ubv_files
 
 def archive_ubv_file(ubv_file, archive_path):
+    """Archives the given UBV file to the path. Will create the directory
+       if it doesn't exist.
+
+    Args:
+        ubv_file (dict): The UBV file dict.
+        archive_path (str): The base path for the archive.
+    """
     logger.debug("Archiving {} to {}.".format(ubv_file['file'], archive_path))
     ubv_filename = ubv_file['file'].split(os.path.sep)[-1]
     ubv_filepath = ubv_file['file'].replace(ubv_filename, "")
@@ -101,6 +143,12 @@ def archive_ubv_file(ubv_file, archive_path):
     shutil.move((ubv_file['file'] + ".txt"), ubv_archivefile)
 
 def prepare_ubv_file(ubv_file, tmp_path):
+    """Runs the ubnt_ubvinfo script against the given UBV file.
+
+    Args:
+        ubv_file (dict): The UBV file dict.
+        tmp_path (str): The temporary path the script is using.
+    """
     ubv_filename = ubv_file['file'].split(os.path.sep)[-1]
     logger.debug("Creating Indexes for {}".format(ubv_filename))
     ubv_filepath = ubv_file['file'].replace(ubv_filename, "")
@@ -118,6 +166,15 @@ def prepare_ubv_file(ubv_file, tmp_path):
         logger.error("Failed to create UBV index file.")
 
 def remux_file(ubv_file, tmp_path):
+    """Runs the remux utility against the given UBV file.
+
+    Args:
+        ubv_file (dict): The UBV file dict.
+        tmp_path (str): The temporary path the script is using.
+
+    Returns:
+        str: The name of the generated MP4 file.
+    """
     logger.info("Running remux against {}".format(
         ubv_file['file'].split(os.path.sep)[-1]))
     args = ['remux', '-with-audio', '-output-folder', tmp_path, ubv_file['file']]
@@ -135,6 +192,14 @@ def remux_file(ubv_file, tmp_path):
         logger.error("Failed to remux file. Full output:\n{}\n".format(str(resulterr)))
 
 def process_ubv_files(ubv_files, tmp_path, output_path, archive_path):
+    """The main utility to wrap around the process for handling UBV files.
+
+    Args:
+        ubv_files (dict): The list of UBV files to process.
+        tmp_path (str): The temporary path the script is using.
+        output_path (str): The output path from the configuration file.
+        archive_path (str): The archive path from the configuration file.
+    """
     # Get the camera information.
     camera_info = get_cameras(
         config['CLOUDKEY']['cloudkey_controller'], config['CLOUDKEY']['cloudkey_username'],
