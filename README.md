@@ -3,7 +3,7 @@ A collection of scripts and utilities that I use to extract videos from my Cloud
 
 # Introduction
 
-For some reason Ubiquiti has decided that there's no reason to provide long term archival solutions for the Unifi Protect platform. I imagine this is because they use the UBV file format, which are block containers, and to extract the footage would put too much demand on the system. You can upgrade the hard drive to get longer retention, but it doesn't solve the underlying issue that pulling large portions of video can be very time consuming.
+For some reason Ubiquiti has decided that there's no reason to provide long term archival solutions for the Unifi Protect platform. I imagine this is because they use the UBV file format, which are block containers, and to extract the footage would put too much demand on the system. You can upgrade the hard drive to get longer retention, but it doesn't solve the underlying issue that pulling large portions of video can be very time consuming and you have no way of archiving these for legal reasons.
 
 The solution for this came from [petergeneric](https://github.com/petergeneric) in the form of a tool to automate the extraction using `ffmpeg` called [unifi-protect-remux](https://github.com/petergeneric/unifi-protect-remux). The `remux` utility will extract the footage into MP4 files with H.264 and AAC encoding. You can read more about it on the project's page.
 
@@ -26,6 +26,18 @@ This is my environment that I am running it on.
 * Debian 10 running under Windows Subsystem for Linux
 * [Unifi Protect Remux](https://github.com/petergeneric/unifi-protect-remux/)
 * Python 3.5+
+
+### A Note about WSL
+
+If you plan to run this in WSL you should know that it will take up a lot of memory and not release it. An open [Issue 4166](https://github.com/microsoft/WSL/issues/4166) on the WSL Github talks about this and there's lots of reasons why this isn't a bad thing but can look like a bad thing, which I won't get into. Nonetheless you can fix this by placing a file called `.wslconfig` in your `%HOMEPATH%` limiting the maximum memory for WSL instances.
+
+```
+[wsl2]
+memory=12GB
+swap=0
+```
+
+For more details on `.wslconfig` review [Global Options with wslconfig](https://docs.microsoft.com/en-us/windows/wsl/wsl-config#configure-global-options-with-wslconfig).
 
 # Getting Started
 ## CloudKey Setup
@@ -88,9 +100,9 @@ Once this account is created store the username and password somewhere secure, s
 
 Now that the files are stored on a network share I will want to run the preparation utility provided by Peter to generate the necessary timecodes to extract footage. The out of the box script he provides works, but I modified it to work on my workstation.
 
-1. Install the necessary utilities to run `qemu-user`, `ffmpeg`, and `jq` for parsing JSON files.
+1. Install the necessary utilities to run `qemu-user` and `ffmpeg`.
 
-    `sudo apt install -y qemu-user gcc-aarch64-linux-gnu ffmpeg jq`
+    `sudo apt install -y qemu-user gcc-aarch64-linux-gnu ffmpeg`
 
 2. Copy the `ubnt_ubvinfo` from your Unifi Protect installation onto your Linux machine. You can locate it under this path.
 
@@ -117,11 +129,21 @@ Now that the files are stored on a network share I will want to run the preparat
     sudo mv remux /usr/local/bin/
     ```
 
-6. Create the configuration folder for your processing scripts.
+Depending on which user is going to run this you need to pause and credential them, give access to the files, etc. Once this is done you will have to create the folder for the processing scripts.
 
-    `sudo mkdir /etc/unifi-protect-extract`
+7. As the user that will be running this script create a directory to hold the script and dotenv file.
 
-7. Place the `unifi-protect.conf` file in the `/etc/unifi-protect-extract` folder and update the following variables.
+    `mkdir -pv "${HOME}/bin/unifi-protect-extract"`
+
+8. Place the `ubnt_process` file in that location, and copy the `.env.example` file into the directory with the name `.env`. Make `ubnt_process` executable.
+
+    ```
+    cp ubnt_process "${HOME}/bin/unifi-protect-extract/."
+    cp .env.example "${HOME}/bin/unifi-protect-extract/.env"
+    chmod +x "${HOME}/bin/unifi-protect-extract/ubnt_process"
+    ```
+
+9. Update the `.env` file with the proper settings.
 
     `CLOUDKEY_CONTROLLER` with the hostname of your CloudKey controller.
 
@@ -139,29 +161,41 @@ Now that the files are stored on a network share I will want to run the preparat
 
     `UBV_ARCHIVE` with the location to archive .UBV files for eventual deletion.
 
-8. Make the file owned by root and only accessible by root.
+8. Make the file owned by the user and only accessible by them.
 
     ```
-    sudo chown -Rv root:root /etc/unifi-protect-extract
-    sudo chmod 700 /etc/unifi-protect-extract
-    sudo chmod 600 /etc/unifi-protect-extract/unifi-protect.conf
-    ```
-
-9. Install the ubnt_process script in `/usr/local/bin` and make it executable.
-
-    ```
-    mv ubnt_process /usr/local/bin`
-    chmod +x /usr/local/bin/ubnt_process
+    sudo chown -Rv $(whoami):$(whoami) "${HOME}/bin/unifi-protect-extract/."
+    sudo chmod 700 "${HOME}/bin/unifi-protect-extract/"
+    sudo chmod 600 "${HOME}/bin/unifi-protect-extract/.env"
     ```
 
 ## Scheduling Processing
 
+### Processing Times
+
 It's up to you how to handle this. Do you want to output them in the same directory, or somewhere else where a media server can index them? I'll be processing them into a separate directory and grouping by camera, then the additional processing.
+
+For my Debian 9 WSL2 instance I've capped it at 12GB memory and it has full use of the AMD Ryzen 7 2700X. End to end processing the 1080p files can vary on duration. My Debian WSL2 instance is accessing these files via NFS mount so there are bottlenecks on the network when handling the files. However, even if the indices aren't created in advance I see 15 - 45 seconds per file.
+
+I do not have any 4K cameras to run against but if it uses the same 1GB structure it should be easy to estimate the time to process, but it may take more time in ffmpeg due to the file size.
+
+My cameras record at 30FPS with 50% quality to minimize it's storage use. This results in 14 files per camera per day for a total of about 14GB. My expectation of processing times per day will be:
+
+`time to process = (cameras * 14 * 30)`
+
+I had 70 files for a single day that took 30 minutes and 15 seconds to process end to end with the indices already created, which isn't that bad.
+
+### Scheduling via Crontab
+
+**TODO - Pending params**
 
 # TODO
 
- - [ ] Update Python script with docstrings
+ - [x] Update Python script with docstrings
  - [ ] Update Python script with arguments for passing params
  - [x] Update Python script to archive UBV files for purging.
+ - [x] Replace `/etc/` conf files with `dotenv`
  - [ ] Update `cloudkey_sync` to have a Python script feed filelists to rsync to be even more granular.
  - [ ] Finish this document
+   - [ ] Scheduling via Crontab
+   - [ ] Do a dry run end to end of this document.

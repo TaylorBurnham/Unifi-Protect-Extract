@@ -6,13 +6,10 @@ import logging
 import tempfile
 import subprocess
 import requests
+from dotenv import load_dotenv
 from datetime import date, datetime
 from dateutil import parser
 from configparser import ConfigParser
-
-
-# Configuration File Location
-config_file = '/etc/unifi-protect-extract/unifi-protect.conf'
 
 
 def parse_output_file(filepath):
@@ -132,15 +129,13 @@ def archive_ubv_file(ubv_file, archive_path):
     logger.debug("Archiving {} to {}.".format(ubv_file['file'], archive_path))
     ubv_filename = ubv_file['file'].split(os.path.sep)[-1]
     ubv_filepath = ubv_file['file'].replace(ubv_filename, "")
-    ubv_basepath = ubv_filepath.replace(config['FILEPATHS']['UBV_FILES'] + "/", "")
+    ubv_basepath = ubv_filepath.replace(config['paths']["ubv_files"] + "/", "")
     ubv_archivepath = os.path.join(archive_path, ubv_basepath)
     ubv_archivefile = os.path.join(ubv_archivepath, ubv_filename)
     ubv_index_archivefile = os.path.join(ubv_archivepath, (ubv_filename + ".txt"))
     os.makedirs(ubv_archivepath, exist_ok=True)
     logger.debug("Moving {} to archive path {}".format(ubv_filename, ubv_archivepath))
     shutil.move(ubv_file['file'], ubv_archivefile)
-    logger.debug("Moving {} to archive path {}".format((ubv_filename + ".txt"), ubv_archivepath))
-    shutil.move((ubv_file['file'] + ".txt"), ubv_archivefile)
 
 def prepare_ubv_file(ubv_file, tmp_path):
     """Runs the ubnt_ubvinfo script against the given UBV file.
@@ -182,12 +177,13 @@ def remux_file(ubv_file, tmp_path):
     r.wait()
     # When completed get the name of the output file.
     resulterr = r.stderr.read()
-    output_data = next((x for x in str(resulterr).split('\\n') if x.startswith('Writing MP4')), None)
-    if output_data:
-        mp4_file = next((x for x in output_data.split(' ') if tmp_path in x), None)
-        if os.path.exists(mp4_file):
-            logger.info("Completed remux of {}".format(mp4_file))
-            return mp4_file
+    output_files = [x for x in str(resulterr).split('\\n') if x.startswith('Writing MP4')]
+    if len(output_files) > 0:
+        mp4_files = [next((y for y in x.split(' ') if tmp_path in y), None) for x in output_files]
+        logger.info("Completed remux of {}".format(ubv_file['file']))
+        for mp4_file in mp4_files:
+            logger.debug("Output File(s): {}".format(mp4_file))
+        return mp4_files
     else:
         logger.error("Failed to remux file. Full output:\n{}\n".format(str(resulterr)))
 
@@ -202,8 +198,8 @@ def process_ubv_files(ubv_files, tmp_path, output_path, archive_path):
     """
     # Get the camera information.
     camera_info = get_cameras(
-        config['CLOUDKEY']['cloudkey_controller'], config['CLOUDKEY']['cloudkey_username'],
-        config['CLOUDKEY']['cloudkey_password'], verify_ssl
+        config['cloudkey']['controller'], config['cloudkey']['username'],
+        config['cloudkey']['password'], verify_ssl
     )
     for ubv_folder, ubv_data in ubv_files.items():
         logger.info("Processing {}".format(ubv_data['date'].strftime("%Y-%m-%d")))
@@ -212,25 +208,62 @@ def process_ubv_files(ubv_files, tmp_path, output_path, archive_path):
             if not ubv_file['prepared']:
                 logger.debug("File hasn't been prepared with indexes.")
                 prepare_ubv_file(ubv_file, tmp_path)
-            mp4_file = remux_file(ubv_file, tmp_path)
-            mp4_data = parse_output_file(mp4_file)
-            mp4_data['camera'] = camera_info[mp4_data['camera']]
-            mp4_output_date = mp4_data['date'].strftime("%Y-%m-%d".format(os.path.sep))
-            mp4_output_path = os.path.join(
-                config['FILEPATHS']['ubv_output'], mp4_output_date, mp4_data['camera']['name']
-            )
-            os.makedirs(mp4_output_path, exist_ok=True)
-            # Now move the file
-            mp4_filename = "{}.mp4".format("_".join([mp4_data['camera']['name'], mp4_data['date'].isoformat().replace(':','.')]))
-            mp4_output_file = os.path.join(
-                mp4_output_path, mp4_filename
-            )
-            new_path = shutil.move(mp4_data['path'], mp4_output_file)
-            logger.info("Moved output MP4 to {}".format(new_path))
+            mp4_files = remux_file(ubv_file, tmp_path)
+            for mp4_file in mp4_files:
+                logger.debug("Relocating {}".format(mp4_file))
+                mp4_data = parse_output_file(mp4_file)
+                mp4_data['camera'] = camera_info[mp4_data['camera']]
+                mp4_output_date = mp4_data['date'].strftime("%Y-%m-%d".format(os.path.sep))
+                mp4_output_path = os.path.join(
+                    config['paths']['ubv_output'], mp4_output_date, mp4_data['camera']['name']
+                )
+                os.makedirs(mp4_output_path, exist_ok=True)
+                # Now move the file
+                mp4_filename = "{}.mp4".format("_".join([mp4_data['camera']['name'], mp4_data['date'].isoformat().replace(':','.')]))
+                mp4_output_file = os.path.join(
+                    mp4_output_path, mp4_filename
+                )
+                new_path = shutil.move(mp4_data['path'], mp4_output_file)
+                logger.info("Moved output MP4 to {}".format(new_path))
             # Archive
             archive_ubv_file(
                 ubv_file, archive_path
             )
+
+def load_config(env_path='.env'):
+    if not os.path.exists(env_path):
+        raise FileNotFoundError("Cannot find dotenv file {}".format(env_path))
+        sys.exit(1)
+    else:
+        load_dotenv()
+        config_loaded = load_dotenv(dotenv_path=env_path)
+    config = {
+        "cloudkey": {
+            "username": os.environ.get('CLOUDKEY_USERNAME'),
+            "password": os.environ.get('CLOUDKEY_PASSWORD'),
+            "controller": os.environ.get('CLOUDKEY_CONTROLLER')
+        },
+        "paths": {
+            "ubv_files": os.environ.get('UBV_FILES'),
+            "ubv_temp": os.environ.get('UBV_TEMP'),
+            "ubv_output": os.environ.get('UBV_OUTPUT'),
+            "ubv_archive": os.environ.get('UBV_ARCHIVE')
+        }
+    }
+    # Determine if we should validate SSL certificates
+    verify_ssl = (
+        os.environ.get('CLOUDKEY_VERIFY_SSL').lower() in ['true', '1', 'yes', 'y']
+    )
+    if not verify_ssl:
+        logger.warn("Disabling SSL verification due to CLOUDKEY_VERIFY_SSL={}.".format(verify_ssl))
+        import urllib3
+        urllib3.disable_warnings()
+    else:
+        logger.debug("SSL verification enabled.")
+    return config, verify_ssl
+
+def parse_arguments(args):
+    pass
 
 if __name__ == "__main__":
     logging_handler = logging.StreamHandler(sys.stdout)
@@ -241,29 +274,19 @@ if __name__ == "__main__":
     )
     logger = logging.getLogger(__name__)
     logger.info("Initialized.")
-    config = ConfigParser()
-    logger.debug("Reading configuration file at {}".format(config_file))
-    config.read(config_file)
-    # Determine if we should validate SSL certificates
-    verify_ssl = config['CLOUDKEY'].getboolean('CLOUDKEY_VERIFY_SSL')
-    if not verify_ssl:
-        logger.warn("Disabling SSL verification due to CLOUDKEY_VERIFY_SSL={}.".format(verify_ssl))
-        import urllib3
-        urllib3.disable_warnings()
-    else:
-        logger.debug("SSL verification enabled.")
+    config, verify_ssl = load_config()
     # Get the UBV files
     logger.info("Collecting UBV files.")
-    ubv_files = get_ubv_files(config['FILEPATHS']['ubv_files'])
+    ubv_files = get_ubv_files(config['paths']['ubv_files'])
     # Make our temporary path
-    TEMPORARY_PATH=tempfile.mkdtemp(dir=config['FILEPATHS']['ubv_temp'])
+    TEMPORARY_PATH=tempfile.mkdtemp(dir=config['paths']['ubv_temp']])
     logger.debug("Temporary Path: {}".format(TEMPORARY_PATH))
     # Process the files
     logger.info("Processing UBV Files")
     process_ubv_files(
         ubv_files=ubv_files,
         tmp_path=TEMPORARY_PATH,
-        output_path=config['FILEPATHS']['ubv_output'],
-        archive_path=config['FILEPATHS']['ubv_archive']
+        output_path=config['paths']['ubv_output'],
+        archive_path=config['paths']['ubv_archive']
     )
     logger.info("Completed Process")
