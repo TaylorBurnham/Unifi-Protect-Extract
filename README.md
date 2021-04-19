@@ -1,3 +1,11 @@
+# Big ol' WIP Warning
+
+
+
+**This is a work in progress. You shouldn't use this without backing up your data first.** I'm picking this back up but have no commitments on when it'll be production ready.
+
+
+
 # Unifi-Protect-Extract
 A collection of scripts and utilities that I use to extract videos from my CloudKey Gen 2 running Unifi Protect.
 
