@@ -1,0 +1,15 @@
+{
+    "cameras": [{
+            "mac": "B4FBE48C5F9E",
+            "host": "192.168.1.219",
+            "type": "UVC G3",
+            "name": "Hallway"
+        },
+        {
+            "mac": "B4FBE4FBC66F",
+            "host": "192.168.1.42",
+            "type": "UVC G3",
+            "name": "Front Yard"
+        }
+    ]
+}
