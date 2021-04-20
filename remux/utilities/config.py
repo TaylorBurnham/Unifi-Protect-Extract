@@ -26,10 +26,10 @@ class Config():
 
 class PathCfg():
     def __init__(self):
-        self.files = os.environ.get('UBV_FILES'),
-        self.temp = os.environ.get('UBV_TEMP'),
-        self.output = os.environ.get('UBV_OUTPUT'),
-        self.archive = os.environ.get('UBV_ARCHIVE')
+        self.files = os.environ.get('UBV_FILES')
+        self.temp = os.environ.get('UBV_TEMP')
+        self.output = os.environ.get('UBV_OUTPUT')
+        self.min_age = int(os.environ.get("UBV_MIN_AGE"))
 
 
 class CloudKeyCfg(object):
