@@ -20,6 +20,32 @@ class UBVRemux():
                 f"Initialized with {self.temp} as temp path."
             )
 
+    def clean_up(self):
+        if len(os.listdir(self.temp)) == 0:
+            self.logger.debug(
+                f"Cleaning up {self.temp}"
+            )
+            shutil.rmtree(self.temp)
+        else:
+            self.logger.warning(
+                f"Refusing to clean up {self.temp} due to remaining files."
+            )
+
+    def remux_ubv_by_date(self, date, cameras):
+        self.logger.debug(f"Remuxing UBV files by date {date}.")
+        ubv_files = self.get_ubv_by_date(date)
+        self.prepare_ubv_files(ubv_files)
+        self.logger.info(f"Beginning remux for {date}")
+        for ubv_file in ubv_files:
+            mp4_files = self.remux_file(ubv_file)
+            for mp4_file in mp4_files:
+                mp4dict = self.parse_mp4(mp4_file, cameras)
+                result = self.move_mp4(mp4dict)  # noqa: F841
+            self.logger.info(
+                f"Marking {ubv_file['file']} as muxed."
+            )
+            self._set_file_muxed(ubv_file)
+
     def get_ubv_by_date(self, date):
         self.logger.debug(f"Getting UBV files by date {date}.")
         ubv_files = self.get_ubv_files()
@@ -78,12 +104,23 @@ class UBVRemux():
         return filelist
 
     def remux_file(self, ubv_file):
-        self.logger.debug(
-            f"Performing remux against {ubv_file['file']}"
-        )
+        if ubv_file['muxed']:
+            self.logger.debug(
+                f"Skipping {ubv_file['file']} - already remuxed"
+            )
+            mp4_files = None
+        else:
+            self.logger.debug(
+                f"Performing remux against {ubv_file['file']}"
+            )
+            mp4_files = self._remux(ubv_file, self.config.temp)
+        return mp4_files
+
+    @staticmethod
+    def _remux(ubv_file, temp_path):
         args = [
             "remux", "-with-audio", "-output-folder",
-            self.temp, ubv_file['file']
+            temp_path, ubv_file['file']
         ]
         r = subprocess.Popen(
             args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
@@ -96,17 +133,10 @@ class UBVRemux():
         if len(output_files) > 0:
             mp4_files = [
                 next(
-                    (y for y in x.split(' ') if self.config.temp in y), None
+                    (y for y in x.split(' ') if temp_path in y), None
                 ) for x in output_files
             ]
-            for mp4_file in mp4_files:
-                self.logger.debug(f"Output File: {mp4_file}")
         else:
-            self.logger.error(
-                f"Failed to remux {ubv_file['file']}"
-                "Full Output:"
-                f"{str(result)}"
-            )
             mp4_files = None
         return mp4_files
 
