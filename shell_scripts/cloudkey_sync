@@ -3,6 +3,9 @@
 RSYNC_USER="cloudkey-sync"
 RSYNC_HOST="nas.local"
 RSYNC_PATH="/path/to/sync/dest"
+# Permissions for the destination - see the manpage
+# for more details on --chmod
+RSYNC_PERMISSIONS="Du=rwx,Dg=rwx,Do=rx,Fu=rw,Fg=rw,Fo=r"
 # Age of files in days.
 RSYNC_AGE=1
 
@@ -41,6 +44,7 @@ else
     echo "Maximum Age is ${FILE_AGE} days."
     rsync -avP --inplace \
      -e "ssh -i /root/.ssh/id_rsa -p 22" \
+     --chmod="${RSYNC_PERMISSIONS}" \
      --files-from=<(find "${SRC_PATH}" -mtime -"${FILE_AGE}" -type f -name "*_0_rotating_*.ubv" -exec realpath --relative-to "${SRC_PATH}" '{}' \;) \
      "${SRC_PATH}" "${DST_PATH}"
     echo "Done!"
