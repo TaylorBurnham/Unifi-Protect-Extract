@@ -47,6 +47,10 @@ class LogCfg(object):
             os.environ.get('LOGGING_ENABLED'))
         self.logfile = _check_boolean(
             os.environ.get('LOGGING_TO_FILE'))
+        if self.logfile:
+            self.logpath = os.environ.get('LOGGING_FILEPATH')
+        else:
+            self.logpath = None
         self.format = os.environ.get('LOGGING_FORMAT')
         self.level = logging.getLevelName(
             os.environ.get('LOGGING_LEVEL')

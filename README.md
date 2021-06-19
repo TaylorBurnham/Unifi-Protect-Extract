@@ -1,6 +1,24 @@
 # Work in Progress Warning
 
-I've nuked this to start from scratch. You can work from older commits at your own risk. For now if you want to follow this project and retain your UBV files for when it's ready I've left the `cloudkey_sync` script in the `shell_scripts` folder.
+**Use this at your own risk. It is _mostly_ working but you should be wary of any script with a single contributor.** Feedback is welcome.
+
+I've nuked this to start from scratch. You can work from older commits at your own risk. For now if you want to follow this project and retain your UBV files for when it's ready I've left the `cloudkey_sync` script in the `shell_scripts` folder. The basic functionality is available in the `remux.py` script and the usage is below. As of now it will not remove any files.
+
+    usage: remux.py [-h] [--environment ENVIRONMENT] [--parse-date PARSE_DATE] [--parse-all     [PARSE_ALL]]
+                    [--list-dates [LIST_DATES]]
+
+    Unifi Protect Extract - A Working Title!
+
+    optional arguments:
+      -h, --help            show this help message and exit
+      --environment ENVIRONMENT, -e ENVIRONMENT
+                            The location of the .env file. Defaults to '.env'
+      --parse-date PARSE_DATE, -pd PARSE_DATE
+                            Parse UBV files from a specific date.
+      --parse-all [PARSE_ALL], -pa [PARSE_ALL]
+                            Parse all UBV files available.
+      --list-dates [LIST_DATES], -ls [LIST_DATES]
+                            List all of the dates available for parsing.
 
 # Unifi-Protect-Extract
 A collection of scripts and utilities that I use to extract videos from my CloudKey Gen 2 running Unifi Protect.
@@ -89,3 +107,30 @@ These steps will get the CloudKey set up for synchronizing the UBV files to anot
     The UBV format means that each time they roll over a new file is allocated in that 1GB block, and rsync will detect changes on that file and synchronize it. That's a waste of time in my opinion and it's better to just run every 4 hours and avoid wasted CPU time.
 
 The files should synchronize and depending on your network speed, the retention policy on the CloudKey, and other things it could take some time.
+
+## Script Setup
+
+At a high level you need to do the following:
+
+* Create a Python 3.9 environment.
+* Install requirements via `pip install -r requirements.txt`
+* Copy the `.env.example` to `.env` and configure accordingly.
+
+To verify your configuration is _mostly_ working you can run the command below to list available files.
+
+```shell
+remux.py --list-dates
+```
+
+Example output is below.
+
+    [2021-06-19 13:04:28,695] {processing.py:136} INFO - Found the following files:
+    +------------+----------+----------+------------+------------+-------+
+    |    Date    | Backyard | Driveway | Rear Entry | Front Yard | Total |
+    +------------+----------+----------+------------+------------+-------+
+    | 2021-01-27 |    7     |    9     |     8      |     12     |   36  |
+    | 2021-01-28 |    15    |    14    |     13     |     22     |   64  |
+    | 2021-01-29 |    16    |    14    |     14     |     22     |   66  |
+    | 2021-01-30 |    13    |    14    |     13     |     22     |   62  |
+
+From this you can run `remux.py --parse-date <date>`, and it will begin remuxing those files, or you can run `remux.py --parse-all` to parse all files available. By default it will not parse files uploaded within 3 days to avoid conflicts with the sync script, but I plan to fix this in the future.

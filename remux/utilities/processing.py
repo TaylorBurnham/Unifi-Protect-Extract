@@ -4,8 +4,9 @@ import logging
 import tempfile
 import subprocess
 from pathlib import Path
-from datetime import date, timedelta
 from dateutil import parser
+from datetime import date, timedelta
+from prettytable import PrettyTable
 
 
 class UBVRemux():
@@ -37,14 +38,19 @@ class UBVRemux():
         self.prepare_ubv_files(ubv_files)
         self.logger.info(f"Beginning remux for {date}")
         for ubv_file in ubv_files:
-            mp4_files = self.remux_file(ubv_file)
-            for mp4_file in mp4_files:
-                mp4dict = self.parse_mp4(mp4_file, cameras)
-                result = self.move_mp4(mp4dict)  # noqa: F841
             self.logger.info(
-                f"Marking {ubv_file['file']} as muxed."
+                f"Processing File {ubv_files.index(ubv_file) + 1} "
+                f"of {len(ubv_files)}"
             )
-            self._set_file_muxed(ubv_file)
+            mp4_files = self.remux_file(ubv_file)
+            if mp4_files:
+                for mp4_file in mp4_files:
+                    mp4dict = self.parse_mp4(mp4_file, cameras)
+                    result = self.move_mp4(mp4dict)  # noqa: F841
+                self.logger.info(
+                    f"Marking {ubv_file['file']} as muxed."
+                )
+                self._set_file_muxed(ubv_file)
 
     def get_ubv_by_date(self, date):
         self.logger.debug(f"Getting UBV files by date {date}.")
@@ -99,9 +105,36 @@ class UBVRemux():
                 k: v for k, v in filelist.items() if (k < min_age_date)
             }
         self.logger.debug(
-            f"Returning {len(filelist)} of files."
+            f"Returning {len(filelist)} days worth of files."
         )
         return filelist
+
+    def get_ubv_filecounts(self, cameras):
+        # Build a table to pretty print
+        camera_list = sorted(list(cameras.keys()))
+        header = [cameras[c]['name'] for c in camera_list]
+        header.insert(0, 'Date')
+        header.append('Total')
+        # Build the table
+        table = PrettyTable(header)
+        ubv_files = self.get_ubv_files(filter_age=False)
+        for dk in sorted(ubv_files.keys()):
+            ds = dk.strftime("%F")
+            ubvf = ubv_files[dk]
+            row = [ds]
+            row_total = 0
+            for camera in camera_list:
+                # Get the counts
+                cam_files = [
+                    x for x in ubvf
+                    if os.path.split(x['file'])[-1].startswith(camera)
+                ]
+                row.append(len(cam_files))
+                row_total = row_total + len(cam_files)
+            row.append(row_total)
+            table.add_row(row)
+        self.logger.info("Found the following files:")
+        print(table)
 
     def remux_file(self, ubv_file):
         if ubv_file['muxed']:
@@ -111,9 +144,10 @@ class UBVRemux():
             mp4_files = None
         else:
             self.logger.debug(
-                f"Performing remux against {ubv_file['file']}"
+                f"Performing remux against {ubv_file['file']} "
+                f"in {self.temp}"
             )
-            mp4_files = self._remux(ubv_file, self.config.temp)
+            mp4_files = self._remux(ubv_file, self.temp)
         return mp4_files
 
     @staticmethod
@@ -122,6 +156,7 @@ class UBVRemux():
             "remux", "-with-audio", "-output-folder",
             temp_path, ubv_file['file']
         ]
+        print(args)
         r = subprocess.Popen(
             args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )

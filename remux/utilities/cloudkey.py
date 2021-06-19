@@ -1,3 +1,4 @@
+import sys
 import urllib3
 import requests
 import logging
@@ -44,16 +45,25 @@ class CloudKey():
         auth = session.post(  # noqa: F841
             f"{self.url}/api/auth/login", data=authentication
         )
-        bootstrap = session.get(
-            f"{self.url}/proxy/protect/api/bootstrap"
-        )
-        deauth = session.post(  # noqa: F841
-            f"{self.url}/api/auth/logout"
-        )
-        self.logger.debug(
-            "Returning bootstrap data from cloudkey."
-        )
-        return bootstrap.json()
+        if auth.status_code != 200:
+            self.logger.critical(
+                f"Status Code {auth.status_code} raised on "
+                "authentication attempt. Bad password?"
+                "Exiting..."
+            )
+            sys.exit(1)
+        else:
+            bootstrap = session.get(
+                f"{self.url}/proxy/protect/api/bootstrap"
+            )
+            deauth = session.post(  # noqa: F841
+                f"{self.url}/api/auth/logout"
+            )
+            self.logger.debug(
+                "Returning bootstrap data from cloudkey."
+            )
+            cameras = bootstrap.json()
+        return cameras
 
     def get_cameras(self):
         self.logger.info("Getting Cameras")
