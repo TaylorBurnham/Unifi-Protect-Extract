@@ -1,3 +1,7 @@
+# Abandonment Warning
+
+I'm ditching the CloudKey for a number of reasons, but the fact that this type of project was necessary just to archive footage is reason enough. You are welcome to do with this project what you will, but I won't be maintaining it any longer. It's in a *mostly* working state now.
+
 # Work in Progress Warning
 
 **Use this at your own risk. It is _mostly_ working but you should be wary of any script with a single contributor.** Feedback is welcome.

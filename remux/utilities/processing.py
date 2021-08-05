@@ -156,7 +156,6 @@ class UBVRemux():
             "remux", "-with-audio", "-output-folder",
             temp_path, ubv_file['file']
         ]
-        print(args)
         r = subprocess.Popen(
             args, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         )
